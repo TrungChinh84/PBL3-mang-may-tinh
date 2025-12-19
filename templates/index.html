@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Firewall Dashboard - PBL4</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .card-stats { border-left: 5px solid #0d6efd; }
+        .status-active { color: green; font-weight: bold; }
+        .status-stopped { color: red; font-weight: bold; }
+    </style>
+</head>
+<body class="bg-light">
+
+<nav class="navbar navbar-dark bg-primary mb-4">
+    <div class="container">
+        <span class="navbar-brand mb-0 h1">🛡️ Hệ Thống Quản Lý Tường Lửa</span>
+        <a href="/logout" class="btn btn-sm btn-light">Đăng xuất</a>
+    </div>
+</nav>
+
+<div class="container">
+    <!-- Status Cards -->
+    <div class="row mb-4">
+        <div class="col-md-4">
+            <div class="card card-stats shadow-sm">
+                <div class="card-body">
+                    <h5 class="card-title text-muted">IP Đang Bị Chặn</h5>
+                    <h2 id="blocked-count">0</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card card-stats shadow-sm" style="border-left-color: #dc3545;">
+                <div class="card-body">
+                    <h5 class="card-title text-muted">Dịch Vụ Auto-Block</h5>
+                    <h2 id="service-status">...</h2>
+                    <button class="btn btn-sm btn-outline-dark" onclick="toggleService()">Bật/Tắt</button>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card card-stats shadow-sm" style="border-left-color: #ffc107;">
+                <div class="card-body">
+                    <h5 class="card-title text-muted">Cập nhật lúc</h5>
+                    <h2 id="last-update">--:--:--</h2>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Tabs -->
+    <ul class="nav nav-tabs mb-3" id="myTab" role="tablist">
+        <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#alerts">🚨 Cảnh Báo & Log</button></li>
+        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#rules">📜 Rules IPTables</button></li>
+        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#config">⚙️ Cấu Hình</button></li>
+    </ul>
+
+    <div class="tab-content" id="myTabContent">
+        <!-- Tab Alerts -->
+        <div class="tab-pane fade show active" id="alerts">
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <div class="input-group mb-3">
+                        <input type="text" id="manual-ip" class="form-control" placeholder="Nhập IP để xử lý thủ công...">
+                        <button class="btn btn-danger" onclick="manualAction('block')">Chặn Ngay</button>
+                        <button class="btn btn-success" onclick="manualAction('unblock')">Gỡ Chặn</button>
+                    </div>
+                    <table class="table table-striped table-hover">
+                        <thead>
+                            <tr>
+                                <th>Thời gian</th>
+                                <th>IP Nguồn</th>
+                                <th>Hành động</th>
+                                <th>Lý do</th>
+                            </tr>
+                        </thead>
+                        <tbody id="alert-table-body">
+                            <!-- Dữ liệu sẽ load ở đây -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab Rules -->
+        <div class="tab-pane fade" id="rules">
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <button class="btn btn-secondary mb-2" onclick="loadRules()">Làm mới Rules</button>
+                    <pre id="iptables-rules" class="bg-dark text-white p-3 rounded">Đang tải...</pre>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab Config -->
+        <div class="tab-pane fade" id="config">
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <form id="config-form">
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label>Ngưỡng SYN (gói/phút)</label>
+                                <input type="number" class="form-control" id="conf-syn">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label>Ngưỡng Connection</label>
+                                <input type="number" class="form-control" id="conf-conn">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label>Thời gian chặn (giây) - 0 là vĩnh viễn</label>
+                                <input type="number" class="form-control" id="conf-ban">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label>Whitelist (Các IP cách nhau dấu phẩy)</label>
+                                <input type="text" class="form-control" id="conf-white">
+                            </div>
+                        </div>
+                        <button type="button" class="btn btn-primary" onclick="saveConfig()">Lưu Cấu Hình</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    // --- Utils ---
+    async function apiCall(url, method='GET', body=null) {
+        const opts = { method: method, headers: {'Content-Type': 'application/json'} };
+        if (body) opts.body = JSON.stringify(body);
+        const res = await fetch(url, opts);
+        if (res.redirected) window.location.href = res.url;
+        return res.json();
+    }
+
+    // --- Status Loop ---
+    function updateStatus() {
+        apiCall('/api/status').then(data => {
+            document.getElementById('blocked-count').innerText = data.blocked_count;
+            document.getElementById('last-update').innerText = data.updated_at;
+            
+            const srv = document.getElementById('service-status');
+            srv.innerText = data.service_status;
+            srv.className = data.service_status === 'ACTIVE' ? 'status-active' : 'status-stopped';
+
+            // Update Alerts Table
+            const tbody = document.getElementById('alert-table-body');
+            tbody.innerHTML = '';
+            data.alerts.forEach(alert => {
+                const row = `<tr>
+                    <td>${new Date(alert.timestamp * 1000).toLocaleString()}</td>
+                    <td>${alert.ip}</td>
+                    <td><span class="badge bg-${alert.action === 'BLOCKED' ? 'danger' : 'success'}">${alert.action}</span></td>
+                    <td>${alert.reason}</td>
+                </tr>`;
+                tbody.innerHTML += row;
+            });
+        });
+    }
+
+    // --- Actions ---
+    function manualAction(type) {
+        const ip = document.getElementById('manual-ip').value;
+        if (!ip) return alert('Vui lòng nhập IP');
+        apiCall('/api/action', 'POST', {type: type, ip: ip}).then(res => {
+            alert(res.message);
+            updateStatus();
+        });
+    }
+
+    function toggleService() {
+        const current = document.getElementById('service-status').innerText;
+        apiCall('/api/action', 'POST', {type: 'toggle_service', current_status: current}).then(res => {
+            alert(res.message);
+            setTimeout(updateStatus, 1000);
+        });
+    }
+
+    function loadRules() {
+        apiCall('/api/rules').then(data => {
+            document.getElementById('iptables-rules').innerText = data.rules;
+        });
+    }
+
+    // --- Config ---
+    function loadConfig() {
+        apiCall('/api/config').then(data => {
+            if (!data) return;
+            document.getElementById('conf-syn').value = data.syn_threshold || 50;
+            document.getElementById('conf-conn').value = data.conn_threshold || 100;
+            document.getElementById('conf-ban').value = data.ban_time || 0;
+            document.getElementById('conf-white').value = (data.whitelist || []).join(', ');
+        });
+    }
+
+    function saveConfig() {
+        const config = {
+            syn_threshold: parseInt(document.getElementById('conf-syn').value),
+            conn_threshold: parseInt(document.getElementById('conf-conn').value),
+            ban_time: parseInt(document.getElementById('conf-ban').value),
+            check_interval: 10,
+            whitelist: document.getElementById('conf-white').value.split(',').map(s => s.trim()).filter(s => s)
+        };
+        apiCall('/api/config', 'POST', config).then(res => alert(res.message));
+    }
+
+    // Init
+    setInterval(updateStatus, 5000);
+    updateStatus();
+    loadRules();
+    loadConfig();
+</script>
+</body>
+</html>
